@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>UBL MONT — Field Data Capture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f0f1a; --surface: #1a1a2e; --accent: #00a651; --accent2: #007a3d;
+    --text: #f0f0f0; --text2: #a0a0b0; --border: #2a2a45; --input-bg: #12122a;
+    --error: #e05252; --fixed: #1e2a1e; --radius: 10px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; padding-bottom: 60px; }
+
+  .app-header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 20px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 100; }
+  .app-header .logo { width: 38px; height: 38px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; color: #fff; flex-shrink: 0; }
+  .app-header h1 { font-size: 17px; font-weight: 700; line-height: 1.2; }
+  .app-header p  { font-size: 13px; color: var(--text2); }
+
+  .loading-overlay { position: fixed; inset: 0; background: rgba(15,15,26,.92); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 200; gap: 16px; }
+  .loading-overlay.hidden { display: none; }
+  .load-spinner { width: 40px; height: 40px; border: 3px solid rgba(0,166,81,.3); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  .load-text { color: var(--text2); font-size: 14px; }
+
+  .container { max-width: 640px; margin: 0 auto; padding: 20px 14px; }
+
+  .section-selector { margin-bottom: 28px; }
+  .section-selector > label { display: block; font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
+  .section-pills { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pill { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius); padding: 14px 10px; text-align: center; font-size: 14px; font-weight: 600; cursor: pointer; transition: all .2s; color: var(--text2); user-select: none; }
+  .pill:hover  { border-color: var(--accent); color: var(--text); }
+  .pill.active { border-color: var(--accent); background: rgba(0,166,81,.12); color: var(--accent); }
+  .pill .pill-icon { font-size: 24px; display: block; margin-bottom: 6px; }
+
+  .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px 20px; display: none; }
+  .form-card.visible { display: block; }
+  .card-title { font-size: 19px; font-weight: 700; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .card-title .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+  .field { margin-bottom: 18px; position: relative; }
+  .field label { display: block; font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 7px; }
+  .field label .req { color: var(--accent); margin-left: 2px; }
+  .field input, .field select { width: 100%; background: var(--input-bg); border: 1.5px solid var(--border); border-radius: 8px; padding: 13px 14px; color: var(--text); font-size: 16px; outline: none; transition: border-color .2s; -webkit-appearance: none; appearance: none; }
+  .field select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a0a0b0' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; padding-right: 36px; }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .field input.error, .field select.error { border-color: var(--error); }
+  .field .hint { font-size: 12px; color: var(--text2); margin-top: 5px; }
+  .field input[readonly] { background: var(--fixed); color: var(--accent); border-color: rgba(0,166,81,.25); cursor: default; font-weight: 600; }
+  .field input.auto-filled { background: var(--fixed); color: #7dd4a8; border-color: rgba(0,166,81,.3); }
+
+  .autocomplete-wrap { position: relative; }
+  .autocomplete-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #1e1e38; border: 1.5px solid var(--accent); border-radius: 8px; max-height: 230px; overflow-y: auto; z-index: 50; display: none; }
+  .autocomplete-list.open { display: block; }
+  .ac-item { padding: 10px 13px; cursor: pointer; border-bottom: 1px solid var(--border); }
+  .ac-item:last-child { border-bottom: none; }
+  .ac-item:hover, .ac-item.focused { background: rgba(0,166,81,.12); }
+  .ac-item .ac-name { font-size: 14px; font-weight: 600; color: var(--text); }
+  .ac-item .ac-id   { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .ac-no-results { padding: 12px 13px; color: var(--text2); font-size: 13px; text-align: center; }
+
+  .upload-area { border: 2px dashed var(--border); border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: all .2s; }
+  .upload-area:hover, .upload-area.uploaded { border-color: var(--accent); background: rgba(0,166,81,.05); }
+  .upload-area input[type=file] { display: none; }
+  .upload-icon { font-size: 28px; margin-bottom: 6px; }
+  .upload-text { font-size: 14px; color: var(--text2); }
+  .upload-text strong { color: var(--accent); }
+  .photo-preview { margin-top: 10px; border-radius: 8px; overflow: hidden; max-height: 180px; display: none; }
+  .photo-preview img { width: 100%; height: 180px; object-fit: cover; }
+
+  .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 400px) { .field-grid { grid-template-columns: 1fr; } }
+  .brand-group { margin-bottom: 18px; }
+  .brand-label { font-size: 13px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 8px; }
+
+  .submit-btn { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 17px; font-size: 17px; font-weight: 700; cursor: pointer; margin-top: 24px; transition: background .2s, transform .1s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .submit-btn:hover { background: var(--accent2); }
+  .submit-btn:active { transform: scale(.98); }
+  .submit-btn:disabled { background: #333; cursor: not-allowed; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: #1e3a2e; border: 1px solid var(--accent); color: var(--text); padding: 14px 24px; border-radius: 50px; font-size: 15px; font-weight: 600; z-index: 999; transition: transform .3s; white-space: nowrap; max-width: 90vw; text-align: center; }
+  .toast.error-toast { background: #3a1e1e; border-color: var(--error); }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  .spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 600px) {
+    .app-header h1 { font-size: 20px; }
+    .app-header p  { font-size: 14px; }
+    .pill { font-size: 16px; padding: 16px 10px; }
+    .pill .pill-icon { font-size: 28px; margin-bottom: 8px; }
+    .card-title { font-size: 22px; }
+    .field label { font-size: 15px; }
+    .field input, .field select { font-size: 17px; padding: 15px 14px; }
+    .submit-btn { font-size: 18px; padding: 19px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="load-spinner"></div>
+  <div class="load-text">Loading outlet data…</div>
+</div>
+
+<div class="app-header">
+  <div class="logo">UB</div>
+  <div>
+    <h1>UBL MONT Data Capture</h1>
+    <p>West Region · Modern On-Trade</p>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="section-selector">
+    <label>Select Data Type</label>
+    <div class="section-pills">
+      <div class="pill" data-section="COOLER"  onclick="selectSection(this)"><span class="pill-icon">🧊</span>Cooler Deployment</div>
+      <div class="pill" data-section="CGC"     onclick="selectSection(this)"><span class="pill-icon">📋</span>CGC Element</div>
+      <div class="pill" data-section="TOOLKIT" onclick="selectSection(this)"><span class="pill-icon">🛠️</span>Toolkit + Activation</div>
+      <div class="pill" data-section="BARWARE" onclick="selectSection(this)"><span class="pill-icon">🍺</span>Barware Deployment</div>
+      <div class="pill" data-section="REPAIR"  onclick="selectSection(this)" style="grid-column:1/-1"><span class="pill-icon">🔧</span>Asset Repair / Removal</div>
+    </div>
+  </div>
+
+  <!-- COOLER DEPLOYMENT -->
+  <div id="form-COOLER" class="form-card">
+    <div class="card-title"><span class="dot"></span>Cooler Deployment</div>
+    <div class="field"><label>Outlet Name <span class="req">*</span></label><div class="autocomplete-wrap"><input type="text" id="c-outletName" placeholder="Start typing outlet name..." autocomplete="off" oninput="acSearch(this,'c')" onkeydown="acKeydown(event,'c')"><div class="autocomplete-list" id="ac-c"></div></div></div>
+    <div class="field"><label>Outlet ID</label><input type="text" id="c-outletId" readonly placeholder="Auto-filled on outlet selection"></div>
+    <div class="field"><label>City</label><input type="text" id="c-city" readonly placeholder="Auto-filled on outlet selection"></div>
+    <hr class="divider">
+    <div class="field"><label>State <span class="req">*</span></label><input type="text" id="c-state" placeholder="e.g. Maharashtra"></div>
+    <div class="field"><label>Cooler Type <span class="req">*</span></label><select id="c-coolerType"><option value="">— Select —</option><option>KF Single Door</option><option>KF Double Door</option><option>HNK Single Door</option><option>HNK Counter Top</option></select></div>
+    <div class="field"><label>Address / Location</label><input type="text" id="c-address" placeholder="Paste Google Maps link here"><div class="hint">Open Google Maps → Share → Copy link → Paste above</div></div>
+    <div class="field"><label>Outlet GSTN</label><input type="text" id="c-gstn" placeholder="GST number"></div>
+    <hr class="divider">
+    <div class="field"><label>Outlet Contact Name</label><input type="text" id="c-contactName" placeholder="Contact person name"></div>
+    <div class="field"><label>Outlet Contact Number</label><input type="tel" id="c-contactNumber" placeholder="10-digit mobile number"></div>
+    <hr class="divider">
+    <div class="field"><label>CDM Name <span class="req">*</span></label><select id="c-cdmName"><option value="">— Select CDM —</option></select></div>
+    <div class="field"><label>CDM Phone Number</label><input type="tel" id="c-cdmPhone" placeholder="10-digit mobile number"></div>
+    <div class="field"><label>ASM Name</label><input type="text" id="c-asmName" readonly placeholder="Auto-filled on outlet selection"></div>
+    <hr class="divider">
+    <div class="field"><label>RMM Name</label><input type="text" readonly value="Nitin Kothari"></div>
+    <div class="field"><label>RKAM Name</label><input type="text" readonly value="Jasleen Sarna"></div>
+    <div class="field"><label>RBH Name</label><input type="text" readonly value="Jenston Justin"></div>
+    <button class="submit-btn" onclick="submitForm('COOLER')"><span class="btn-text">Submit Cooler Deployment</span><div class="spinner" id="spinner-COOLER"></div></button>
+  </div>
+
+  <!-- CGC ELEMENT -->
+  <div id="form-CGC" class="form-card">
+    <div class="card-title"><span class="dot"></span>CGC Element</div>
+    <div class="field"><label>Outlet Name <span class="req">*</span></label><div class="autocomplete-wrap"><input type="text" id="g-outletName" placeholder="Start typing outlet name..." autocomplete="off" oninput="acSearch(this,'g')" onkeydown="acKeydown(event,'g')"><div class="autocomplete-list" id="ac-g"></div></div></div>
+    <div class="field"><label>Outlet ID</label><input type="text" id="g-outletId" readonly placeholder="Auto-filled on outlet selection"></div>
+    <div class="field"><label>City</label><input type="text" id="g-city" readonly placeholder="Auto-filled on outlet selection"></div>
+    <div class="field"><label>Harmonia Classification</label><input type="text" id="g-harmonia" readonly placeholder="Auto-filled on outlet selection"></div>
+    <hr class="divider">
+    <div class="field"><label>CDM Name <span class="req">*</span></label><select id="g-cdmName"><option value="">— Select CDM —</option></select></div>
+    <div class="field"><label>Element Category <span class="req">*</span></label><select id="g-elementCategory" onchange="updateElementNames()"><option value="">— Select —</option><option>Connect</option><option>Guide</option><option>Convert</option></select></div>
+    <div class="field" id="g-elementNameField" style="display:none"><label>Element Name <span class="req">*</span></label><select id="g-elementName"><option value="">— Select —</option></select></div>
+    <button class="submit-btn" onclick="submitForm('CGC')"><span class="btn-text">Submit CGC Element</span><div class="spinner" id="spinner-CGC"></div></button>
+  </div>
+
+  <!-- TOOLKIT + ACTIVATION -->
+  <div id="form-TOOLKIT" class="form-card">
+    <div class="card-title"><span class="dot"></span>Toolkit + Activation Tracker</div>
+    <div class="field"><label>Outlet Name <span class="req">*</span></label><div class="autocomplete-wrap"><input type="text" id="t-outletName" placeholder="Start typing outlet name..." autocomplete="off" oninput="acSearch(this,'t')" onkeydown="acKeydown(event,'t')"><div class="autocomplete-list" id="ac-t"></div></div></div>
+    <div class="field"><label>Outlet ID</label><input type="text" id="t-outletId" readonly placeholder="Auto-filled on outlet selection"></div>
+    <div class="field"><label>City</label><input type="text" id="t-city" readonly placeholder="Auto-filled on outlet selection"></div>
+    <hr class="divider">
+    <div class="field"><label>CDM Name <span class="req">*</span></label><select id="t-cdmName"><option value="">— Select CDM —</option></select></div>
+    <div class="field"><label>Activation Date <span class="req">*</span></label><input type="date" id="t-activationDate"></div>
+    <div class="field"><label>Lead Brand <span class="req">*</span></label><select id="t-leadBrand"><option value="">— Select Brand —</option><option>Kingfisher Premium</option><option>Kingfisher Ultra</option><option>Heineken</option><option>Other</option></select></div>
+    <div class="field"><label>Activation Type <span class="req">*</span></label><select id="t-activationType"><option value="">— Select —</option><option>5K</option><option>15K</option><option>40K</option><option>150K</option></select></div>
+    <hr class="divider">
+    <div class="field"><label>Name of the Event</label><input type="text" id="t-eventName" placeholder="e.g. Brunches / DJ Night / Holi etc"></div>
+    <div class="field"><label>Footfall for the Event</label><input type="number" id="t-footfall" placeholder="Expected covers / guests" min="0"></div>
+    <div class="field"><label>Actual Cost for the Event (INR)</label><input type="number" id="t-actualCost" placeholder="Total cost in INR" min="0"></div>
+    <hr class="divider">
+    <div class="field"><label>Branding Element 1</label><input type="text" id="t-brandEl1" placeholder="e.g. Standee, Banner, Arch"></div>
+    <div class="field"><label>Branding Element 1 Quantity</label><input type="number" id="t-brandEl1Qty" placeholder="0" min="0"></div>
+    <div class="field"><label>Branding Element 2</label><input type="text" id="t-brandEl2" placeholder="e.g. Standee, Banner, Arch"></div>
+    <div class="field"><label>Branding Element 2 Quantity</label><input type="number" id="t-brandEl2Qty" placeholder="0" min="0"></div>
+    <div class="field"><label>Branding Element 3</label><input type="text" id="t-brandEl3" placeholder="e.g. Standee, Banner, Arch"></div>
+    <div class="field"><label>Branding Element 3 Quantity</label><input type="number" id="t-brandEl3Qty" placeholder="0" min="0"></div>
+    <hr class="divider">
+    <div class="field">
+      <label>Activation Artwork Photo <span class="req">*</span></label>
+      <div class="upload-area" id="t-uploadArea" onclick="document.getElementById('t-artworkFile').click()">
+        <input type="file" id="t-artworkFile" accept="image/*" capture="environment" onchange="artworkSelected(this,'t')">
+        <div class="upload-icon" id="t-uploadIcon">📷</div>
+        <div class="upload-text" id="t-uploadText">Tap to <strong>upload artwork photo</strong></div>
+      </div>
+      <div class="photo-preview" id="t-preview"><img id="t-previewImg" src=""></div>
+    </div>
+    <button class="submit-btn" onclick="submitForm('TOOLKIT')"><span class="btn-text">Submit Toolkit + Activation</span><div class="spinner" id="spinner-TOOLKIT"></div></button>
+  </div>
+
+  <!-- BARWARE DEPLOYMENT -->
+  <div id="form-BARWARE" class="form-card">
+    <div class="card-title"><span class="dot"></span>Barware Deployment</div>
+    <div class="field"><label>Outlet Name <span class="req">*</span></label><div class="autocomplete-wrap"><input type="text" id="b-outletName" placeholder="Start typing outlet name..." autocomplete="off" oninput="acSearch(this,'b')" onkeydown="acKeydown(event,'b')"><div class="autocomplete-list" id="ac-b"></div></div></div>
+    <div class="field"><label>Outlet ID</label><input type="text" id="b-outletId" readonly placeholder="Auto-filled on outlet selection"></div>
+    <div class="field"><label>City</label><input type="text" id="b-city" readonly placeholder="Auto-filled on outlet selection"></div>
+    <hr class="divider">
+    <div class="field"><label>CDM Name <span class="req">*</span></label><select id="b-cdmName"><option value="">— Select CDM —</option></select></div>
+    <hr class="divider">
+    <div class="brand-group"><div class="brand-label">🟢 Kingfisher</div><div class="field-grid">
+      <div class="field"><label>KF Glass 330ml</label><input type="number" id="b-kfGlass330" placeholder="0" min="0"></div>
+      <div class="field"><label>KF Glass 500ml</label><input type="number" id="b-kfGlass500" placeholder="0" min="0"></div>
+      <div class="field"><label>KF Pitcher</label><input type="number" id="b-kfPitcher" placeholder="0" min="0"></div>
+      <div class="field"><label>KF Tower</label><input type="number" id="b-kfTower" placeholder="0" min="0"></div>
+      <div class="field"><label>KF Bucket</label><input type="number" id="b-kfBucket" placeholder="0" min="0"></div>
+    </div></div>
+    <div class="brand-group"><div class="brand-label">⚡ Kingfisher Ultra</div><div class="field-grid">
+      <div class="field"><label>Ultra Glass</label><input type="number" id="b-ultraGlass" placeholder="0" min="0"></div>
+      <div class="field"><label>Ultra Pitcher</label><input type="number" id="b-ultraPitcher" placeholder="0" min="0"></div>
+      <div class="field"><label>Ultra Tower</label><input type="number" id="b-ultraTower" placeholder="0" min="0"></div>
+      <div class="field"><label>Ultra Bucket</label><input type="number" id="b-ultraBucket" placeholder="0" min="0"></div>
+    </div></div>
+    <div class="brand-group"><div class="brand-label">🌟 Heineken</div><div class="field-grid">
+      <div class="field"><label>HNK Glass 250ml</label><input type="number" id="b-hnkGlass250" placeholder="0" min="0"></div>
+      <div class="field"><label>HNK Glass 330ml</label><input type="number" id="b-hnkGlass330" placeholder="0" min="0"></div>
+      <div class="field"><label>HNK Glass 500ml</label><input type="number" id="b-hnkGlass500" placeholder="0" min="0"></div>
+      <div class="field"><label>HNK Pitcher</label><input type="number" id="b-hnkPitcher" placeholder="0" min="0"></div>
+      <div class="field"><label>HNK Tower</label><input type="number" id="b-hnkTower" placeholder="0" min="0"></div>
+      <div class="field"><label>HNK Bucket</label><input type="number" id="b-hnkBucket" placeholder="0" min="0"></div>
+    </div></div>
+    <button class="submit-btn" onclick="submitForm('BARWARE')"><span class="btn-text">Submit Barware Deployment</span><div class="spinner" id="spinner-BARWARE"></div></button>
+  </div>
+
+  <!-- ASSET REPAIR / REMOVAL -->
+  <div id="form-REPAIR" class="form-card">
+    <div class="card-title"><span class="dot"></span>Asset Repair / Removal</div>
+    <div class="field"><label>Outlet Name <span class="req">*</span></label><div class="autocomplete-wrap"><input type="text" id="r-outletName" placeholder="Start typing outlet name..." autocomplete="off" oninput="acSearch(this,'r')" onkeydown="acKeydown(event,'r')"><div class="autocomplete-list" id="ac-r"></div></div></div>
+    <div class="field"><label>Outlet ID</label><input type="text" id="r-outletId" readonly placeholder="Auto-filled on outlet selection"></div>
+    <div class="field"><label>Address (for Agency)</label><input type="text" id="r-address" placeholder="Full address so agency can locate outlet"></div>
+    <hr class="divider">
+    <div class="field"><label>Problem <span class="req">*</span></label><select id="r-problem"><option value="">— Select Problem —</option><option>Repair - Broken</option><option>Repair - Light not Working</option><option>Remove - Asset Broken</option><option>Remove - Outlet Closing</option><option>Remove - Outlet Not Aligned Now</option></select></div>
+    <hr class="divider">
+    <div class="field"><label>CDM Name <span class="req">*</span></label><select id="r-cdmName"><option value="">— Select CDM —</option></select></div>
+    <div class="field"><label>ASM Name</label><input type="text" id="r-asmName" readonly placeholder="Auto-filled on outlet selection"></div>
+    <div class="field"><label>Outlet POC Name</label><input type="text" id="r-pocName" placeholder="Point of contact name"></div>
+    <div class="field"><label>Outlet POC Number</label><input type="tel" id="r-pocNumber" placeholder="10-digit mobile number"></div>
+    <button class="submit-btn" onclick="submitForm('REPAIR')"><span class="btn-text">Submit Repair / Removal</span><div class="spinner" id="spinner-REPAIR"></div></button>
+  </div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ── CONFIGURATION — UPDATE THESE ─────────────────────────────────────────────
+// Your Power Automate HTTP trigger URL (the one you generated)
+const WEBHOOK_URL = "https://default66e853deece344dd9d66ee6bdf4159.d4.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/b382b123a8754ac19bd91f81ecea6295/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=85pmLuLwcQ-Sp-ZA-DeMbf4iOLzVB5-ZVFCZBhJ0mdo";
+
+// Your Power Automate GET flow URL for outlet master (create a second flow — see instructions)
+// Leave blank if using embedded outlets below
+const OUTLET_MASTER_URL = "";
+
+// ── CDM NAMES ────────────────────────────────────────────────────────────────
+const CDM_NAMES = [
+  "Ashmi Choubey","Kanishq Dave","Kishor Deshmukh","Anoushka Khemka",
+  "Isha Bhist","Poonam Kale","Tarun Awasthi","Abhibav Oni","Teerth Gupta",
+  "Sandesh","Kunal Gunjal","TT","Aakash Singh","Akshaya","Amisha",
+  "Ankush","Kaustubh","Prakhar","Shaan","Shweta","Mayank Meena",
+  "Sagar Jaiswal","Smriti","Akshita","Ayushi"
+];
+
+// ── CGC ELEMENT NAMES ─────────────────────────────────────────────────────────
+const ELEMENT_NAMES = {
+  Connect: [
+    "Vallet Desk KF","Vallet Desk HNK","Digital Standee",
+    "HNK Letter Cutout 4 Feet","HNK Letter Cutout 6 Feet",
+    "KF Letter Cutout 4 Feet","KF Letter Cutout 6 Feet",
+    "KF Flange Beer Available here on Tap",
+    "HNK Flange Beer Available here on Tap"
+  ],
+  Guide: [
+    "HNK Clipon with a Message - Horizontal 3x2",
+    "HNK Clipon with a Message - Vertical 2x3",
+    "Amstel Grande Clipon with a Message - Horizontal 3x2",
+    "Amstel Grande Clipon with a Message - Vertical 2x3",
+    "Ultra/Ultra Max Clipon with a Message - Horizontal 3x2",
+    "Ultra/Ultra Max Clipon with a Message - Vertical 2x3"
+  ],
+  Convert: ["Menu Card to be Redone"]
+};
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+var outletMaster    = [];
+var outletLoadState = "idle";
+var acFocusIdx      = {};
+var artworkData     = {};
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", function() {
+  populateCDMs();
+  loadOutletMaster();
+});
+
+function populateCDMs() {
+  document.querySelectorAll("select[id$='cdmName']").forEach(function(sel) {
+    CDM_NAMES.forEach(function(name) {
+      var opt = document.createElement("option");
+      opt.value = opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+function loadOutletMaster() {
+  // If a GET flow URL is configured, fetch from there
+  if (OUTLET_MASTER_URL) {
+    outletLoadState = "loading";
+    fetch(OUTLET_MASTER_URL)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        outletMaster    = Array.isArray(data) ? data : (data.outlets || []);
+        outletLoadState = "loaded";
+        document.getElementById("loadingOverlay").classList.add("hidden");
+      })
+      .catch(function() {
+        outletLoadState = "error";
+        showToast("Could not load outlet data", true);
+        document.getElementById("loadingOverlay").classList.add("hidden");
+      });
+  } else {
+    // No URL configured — hide overlay, autocomplete will say "no data"
+    outletLoadState = "no-source";
+    document.getElementById("loadingOverlay").classList.add("hidden");
+    // NOTE: Add your outlet JSON to OUTLET_DATA below as a fallback
+    if (typeof OUTLET_DATA !== "undefined") {
+      outletMaster = OUTLET_DATA;
+      outletLoadState = "loaded";
+    }
+  }
+}
+
+// ── SECTION SELECTOR ─────────────────────────────────────────────────────────
+function selectSection(el) {
+  document.querySelectorAll(".pill").forEach(function(p) { p.classList.remove("active"); });
+  document.querySelectorAll(".form-card").forEach(function(f) { f.classList.remove("visible"); });
+  el.classList.add("active");
+  var card = document.getElementById("form-" + el.dataset.section);
+  card.classList.add("visible");
+  setTimeout(function() { card.scrollIntoView({ behavior: "smooth", block: "start" }); }, 50);
+}
+
+// ── AUTOCOMPLETE ─────────────────────────────────────────────────────────────
+function acSearch(input, prefix) {
+  var q    = input.value.trim().toLowerCase();
+  var list = document.getElementById("ac-" + prefix);
+  acFocusIdx[prefix] = -1;
+  if (q.length < 2) { list.innerHTML = ""; list.classList.remove("open"); return; }
+  if (outletLoadState !== "loaded") {
+    list.innerHTML = '<div class="ac-no-results">Outlet data not loaded</div>';
+    list.classList.add("open"); return;
+  }
+  var matches = outletMaster.filter(function(o) {
+    return o.name && o.name.toLowerCase().indexOf(q) >= 0;
+  }).slice(0, 30);
+  if (!matches.length) {
+    list.innerHTML = '<div class="ac-no-results">No outlets found</div>';
+    list.classList.add("open"); return;
+  }
+  list.innerHTML = matches.map(function(o, i) {
+    var hl = o.name.replace(new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + ")", "gi"), '<strong style="color:var(--accent)">$1</strong>');
+    return '<div class="ac-item" onmousedown="acSelect(event,\'' + prefix + '\',' + i + ')">' +
+           '<div class="ac-name">' + hl + '</div>' +
+           '<div class="ac-id">ID: ' + (o.id||'') + ' · ' + (o.city||'') + '</div></div>';
+  }).join("");
+  list._matches = matches;
+  list.classList.add("open");
+}
+
+function acSelect(event, prefix, idx) {
+  event.preventDefault();
+  var list   = document.getElementById("ac-" + prefix);
+  var outlet = list._matches[idx];
+  if (!outlet) return;
+  setVal(prefix + "-outletName", outlet.name, false);
+  setVal(prefix + "-outletId",   outlet.id,       true);
+  setVal(prefix + "-city",       outlet.city,     true);
+  if (prefix === "g") setVal("g-harmonia", outlet.harmonia, true);
+  if (prefix === "c") setVal("c-asmName",  outlet.asm,      true);
+  if (prefix === "r") setVal("r-asmName",  outlet.asm,      true);
+  list.innerHTML = ""; list.classList.remove("open");
+}
+
+function setVal(id, val, autoFilled) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.value = val || "";
+  if (autoFilled) el.classList.add("auto-filled");
+  else el.classList.remove("auto-filled");
+}
+
+function acKeydown(e, prefix) {
+  var list = document.getElementById("ac-" + prefix);
+  if (!list.classList.contains("open")) return;
+  var items = list.querySelectorAll(".ac-item");
+  if (!items.length) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); acFocusIdx[prefix] = Math.min((acFocusIdx[prefix]||-1)+1, items.length-1); updateAcFocus(items, acFocusIdx[prefix]); }
+  else if (e.key === "ArrowUp")  { e.preventDefault(); acFocusIdx[prefix] = Math.max((acFocusIdx[prefix]||0)-1, 0); updateAcFocus(items, acFocusIdx[prefix]); }
+  else if (e.key === "Enter")    { e.preventDefault(); var fi=acFocusIdx[prefix]; if(fi>=0&&fi<items.length) items[fi].dispatchEvent(new MouseEvent("mousedown")); }
+  else if (e.key === "Escape")   { list.classList.remove("open"); }
+}
+
+function updateAcFocus(items, idx) {
+  items.forEach(function(item, i) { item.classList.toggle("focused", i === idx); });
+  if (items[idx]) items[idx].scrollIntoView({ block: "nearest" });
+}
+
+document.addEventListener("click", function(e) {
+  if (!e.target.closest(".autocomplete-wrap"))
+    document.querySelectorAll(".autocomplete-list").forEach(function(l) { l.classList.remove("open"); });
+});
+
+// ── CGC ELEMENT NAMES ─────────────────────────────────────────────────────────
+function updateElementNames() {
+  var cat   = document.getElementById("g-elementCategory").value;
+  var field = document.getElementById("g-elementNameField");
+  var sel   = document.getElementById("g-elementName");
+  if (!cat) { field.style.display = "none"; return; }
+  sel.innerHTML = '<option value="">— Select —</option>';
+  (ELEMENT_NAMES[cat] || []).forEach(function(name) {
+    var opt = document.createElement("option");
+    opt.value = opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  field.style.display = "block";
+}
+
+// ── ARTWORK UPLOAD ────────────────────────────────────────────────────────────
+function artworkSelected(input, prefix) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    artworkData[prefix] = { base64: e.target.result.split(",")[1], mimeType: file.type || "image/jpeg" };
+    document.getElementById(prefix + "-previewImg").src = e.target.result;
+    document.getElementById(prefix + "-preview").style.display = "block";
+    document.getElementById(prefix + "-uploadArea").classList.add("uploaded");
+    document.getElementById(prefix + "-uploadIcon").textContent = "✅";
+    document.getElementById(prefix + "-uploadText").innerHTML = "<strong>Photo selected</strong> — tap to change";
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── VALIDATION ────────────────────────────────────────────────────────────────
+function validate(fields) {
+  var ok = true;
+  fields.forEach(function(f) {
+    var el = document.getElementById(f.id);
+    if (!el) return;
+    el.classList.remove("error");
+    if (f.required && !el.value.trim()) { el.classList.add("error"); ok = false; }
+  });
+  return ok;
+}
+
+function v(id) { var el = document.getElementById(id); return el ? el.value.trim() : ""; }
+
+// ── SUBMIT ────────────────────────────────────────────────────────────────────
+function submitForm(section) {
+  var payload = { section: section };
+
+  if (section === "COOLER") {
+    if (!validate([{id:"c-outletName",required:true},{id:"c-state",required:true},{id:"c-coolerType",required:true},{id:"c-cdmName",required:true}]))
+      return showToast("Please fill all required fields", true);
+    payload.outletName    = v("c-outletName"); payload.outletId      = v("c-outletId");
+    payload.city          = v("c-city");       payload.state         = v("c-state");
+    payload.coolerType    = v("c-coolerType"); payload.address       = v("c-address");
+    payload.gstn          = v("c-gstn");       payload.contactName   = v("c-contactName");
+    payload.contactNumber = v("c-contactNumber"); payload.cdmName    = v("c-cdmName");
+    payload.cdmPhone      = v("c-cdmPhone");   payload.asmName       = v("c-asmName");
+  }
+  else if (section === "CGC") {
+    if (!validate([{id:"g-outletName",required:true},{id:"g-cdmName",required:true},{id:"g-elementCategory",required:true},{id:"g-elementName",required:true}]))
+      return showToast("Please fill all required fields", true);
+    payload.outletName = v("g-outletName"); payload.outletId = v("g-outletId");
+    payload.city = v("g-city"); payload.cdmName = v("g-cdmName");
+    payload.harmoniaClassification = v("g-harmonia");
+    payload.elementCategory = v("g-elementCategory"); payload.elementName = v("g-elementName");
+  }
+  else if (section === "TOOLKIT") {
+    if (!validate([{id:"t-outletName",required:true},{id:"t-cdmName",required:true},{id:"t-activationDate",required:true},{id:"t-leadBrand",required:true},{id:"t-activationType",required:true}]))
+      return showToast("Please fill all required fields", true);
+    if (!artworkData["t"]) return showToast("Please upload the activation artwork photo", true);
+    payload.outletName = v("t-outletName"); payload.outletId = v("t-outletId");
+    payload.city = v("t-city"); payload.cdmName = v("t-cdmName");
+    payload.activationDate = v("t-activationDate"); payload.leadBrand = v("t-leadBrand");
+    payload.activationType = v("t-activationType"); payload.eventName = v("t-eventName");
+    payload.footfall = v("t-footfall"); payload.actualCost = v("t-actualCost");
+    payload.brandEl1 = v("t-brandEl1"); payload.brandEl1Qty = v("t-brandEl1Qty");
+    payload.brandEl2 = v("t-brandEl2"); payload.brandEl2Qty = v("t-brandEl2Qty");
+    payload.brandEl3 = v("t-brandEl3"); payload.brandEl3Qty = v("t-brandEl3Qty");
+    payload.artworkBase64 = artworkData["t"].base64;
+    payload.artworkMime   = artworkData["t"].mimeType;
+  }
+  else if (section === "BARWARE") {
+    if (!validate([{id:"b-outletName",required:true},{id:"b-cdmName",required:true}]))
+      return showToast("Please fill all required fields", true);
+    payload.outletName = v("b-outletName"); payload.outletId = v("b-outletId");
+    payload.city = v("b-city"); payload.cdmName = v("b-cdmName");
+    payload.kfGlass330=v("b-kfGlass330")||"0"; payload.kfGlass500=v("b-kfGlass500")||"0";
+    payload.kfPitcher=v("b-kfPitcher")||"0";   payload.kfTower=v("b-kfTower")||"0";
+    payload.kfBucket=v("b-kfBucket")||"0";     payload.ultraGlass=v("b-ultraGlass")||"0";
+    payload.ultraPitcher=v("b-ultraPitcher")||"0"; payload.ultraTower=v("b-ultraTower")||"0";
+    payload.ultraBucket=v("b-ultraBucket")||"0"; payload.hnkGlass250=v("b-hnkGlass250")||"0";
+    payload.hnkGlass330=v("b-hnkGlass330")||"0"; payload.hnkGlass500=v("b-hnkGlass500")||"0";
+    payload.hnkPitcher=v("b-hnkPitcher")||"0"; payload.hnkTower=v("b-hnkTower")||"0";
+    payload.hnkBucket=v("b-hnkBucket")||"0";
+  }
+  else if (section === "REPAIR") {
+    if (!validate([{id:"r-outletName",required:true},{id:"r-problem",required:true},{id:"r-cdmName",required:true}]))
+      return showToast("Please fill all required fields", true);
+    payload.outletName = v("r-outletName"); payload.outletId = v("r-outletId");
+    payload.address = v("r-address");       payload.problem  = v("r-problem");
+    payload.cdmName = v("r-cdmName");       payload.asmName  = v("r-asmName");
+    payload.pocName = v("r-pocName");       payload.pocNumber = v("r-pocNumber");
+  }
+
+  var btn     = document.querySelector("#form-" + section + " .submit-btn");
+  var spinner = document.getElementById("spinner-" + section);
+  var btnText = btn.querySelector(".btn-text");
+  btn.disabled = true; spinner.style.display = "block"; btnText.textContent = "Submitting...";
+
+  fetch(WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })
+  .then(function(r) {
+    btn.disabled = false; spinner.style.display = "none";
+    btnText.textContent = "Submit";
+    if (r.ok) { showToast("✅ Submitted successfully!"); resetForm(section); }
+    else showToast("❌ Submission failed (status " + r.status + ")", true);
+  })
+  .catch(function(err) {
+    btn.disabled = false; spinner.style.display = "none";
+    btnText.textContent = "Submit";
+    showToast("❌ Network error — check connection", true);
+  });
+}
+
+function resetForm(section) {
+  var form = document.getElementById("form-" + section);
+  form.querySelectorAll("input:not([readonly])").forEach(function(el) { el.value = ""; });
+  form.querySelectorAll("select").forEach(function(el) { el.selectedIndex = 0; });
+  form.querySelectorAll("input.auto-filled").forEach(function(el) { el.value = ""; el.classList.remove("auto-filled"); });
+  if (section === "CGC") document.getElementById("g-elementNameField").style.display = "none";
+  if (section === "TOOLKIT") {
+    artworkData["t"] = null;
+    document.getElementById("t-preview").style.display = "none";
+    document.getElementById("t-uploadArea").classList.remove("uploaded");
+    document.getElementById("t-uploadIcon").textContent = "📷";
+    document.getElementById("t-uploadText").innerHTML = "Tap to <strong>upload artwork photo</strong>";
+    document.getElementById("t-artworkFile").value = "";
+  }
+}
+
+var toastTimer;
+function showToast(msg, isError) {
+  var t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className   = "toast" + (isError ? " error-toast" : "") + " show";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() { t.classList.remove("show"); }, 3500);
+}
+</script>
+</body>
+</html>
